@@ -5,6 +5,8 @@ import json
 import os
 import time
 import requests
+import re
+import unicodedata
 from datetime import datetime, timedelta
 from docx import Document
 from docx.shared import Pt, Cm
@@ -20,22 +22,82 @@ HEADERS_DB = {
     'X-Master-Key': API_KEY
 }
 
-# Dicionários para formatação de data
-MESES_PT = {1: 'MAIO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL', 5: 'MAIO', 6: 'JUNHO', 
+# --- DICIONÁRIO OFICIAL DE NOMES DE GUERRA ---
+NOMES_DE_GUERRA = {
+    "Alan Felipe Buck dos Santos": "FELIPE",
+    "Ana Paula Machado": "MACHADO",
+    "Arthur Amador Silva": "ARTHUR",
+    "Carina dos Santos": "CARINA",
+    "Carlos Eduardo Boava": "CARLOS BOAVA",
+    "Carlos Eduardo Soares da Costa Filho": "DA COSTA",
+    "Cláudio Márcio Silva Júnior": "CLÁUDIO",
+    "Daniel Barbosa Ramos": "RAMOS",
+    "Danilo Eduardo de Oliveira": "OLIVEIRA",
+    "Dener Vinícius Gomes Rodrigo": "DENER",
+    "Edilma Aparecida Sereia da Silva": "SEREIA",
+    "Eduardo Cauan José": "JOSÉ",
+    "Eduardo Júnior Marques": "JÚNIOR MARQUES",
+    "Felipe Israel de Almeida Guilherme": "ISRAEL",
+    "Filipe Aparecido dos Santos": "SANTOS",
+    "Gabriel Magdiel Reis": "MAGDIEL",
+    "Gabriela Regina Schneider": "SCHNEIDER",
+    "Gustavo Henrique Nogueira": "NOGUEIRA",
+    "Gustavo Tivirolli Favaro": "TIVIROLLI",
+    "Hemerson Oliveira Pacheco Júnior": "HEMERSON",
+    "Hilda Heloisa Andrade Cunha": "ANDRADE",
+    "Igor Henrique Bibanco": "BIBANCO",
+    "Israel Mendes Martins": "MENDES",
+    "João Victor Bertola da Silva": "BERTOLA",
+    "João Victor Rapharred de Oliveira Abrahao": "RAPHARRED",
+    "Jonathan Henrique das Neves": "HENRIQUE",
+    "Josué Almeida de Souza": "JOSUÉ",
+    "Kauane Stefany Lopes": "LOPES",
+    "Leonardo Brenes Burque": "BURQUE",
+    "Leonardo Cardoso Cosmos": "COSMOS",
+    "Leonardo Santiago Rodrigues": "SANTIAGO",
+    "Letícia Lopes Martelossi": "LETÍCIA",
+    "Lirian Borges Barbosa": "LIRIAN",
+    "Lucas Eduardo Dornellas de Oliveira": "EDUARDO",
+    "Lucas Gabriel Souza de Campos": "CAMPOS",
+    "Lucas Matheus dos Santos Lopes": "LUCAS LOPES",
+    "Lucas Silva Piccioni": "PICCIONI",
+    "Lucas Vinícius da Silva Panta": "PANTA",
+    "Mateus Fujita Araújo": "FUJITA",
+    "Matheus Silva Aleluia": "ALELUIA",
+    "Nathalia Vargas Lopes": "VARGAS",
+    "Priscila de Andrade Correia": "CORREIA",
+    "Rafael Ribeiro Garcia": "RAFAEL GARCIA",
+    "Ricardo Vinícius Zamparoni": "ZAMPARONI",
+    "Tailer Costa Ribeiro dos Santos": "TAILER",
+    "Thiago Zanin": "THIAGO ZANIN",
+    "Thialis Venâncio dos Santos": "VENÂNCIO",
+    "Tiago da Silva Ferreira": "TIAGO FERREIRA",
+    "Victor Gonçalves Brum Silva": "BRUM",
+    "Vitor Hugo Cardoso Almondes": "ALMONDES",
+    "Vitor Humberto Ortega Nascimento": "ORTEGA",
+    "Vitor Kauan Amorim dos Reis": "VITOR REIS",
+    "Vitoria Cristina Cortelini": "CORTELINI",
+    "Wallison Rodrigo Passerini": "PASSERINI",
+    "Wesley Rodrigues Padovan": "PADOVAN"
+}
+
+MESES_PT = {1: 'JANEIRO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL', 5: 'MAIO', 6: 'JUNHO', 
             7: 'JULHO', 8: 'AGOSTO', 9: 'SETEMBRO', 10: 'OUTUBRO', 11: 'NOVEMBRO', 12: 'DEZEMBRO'}
 DIAS_SEMANA_PT = {0: 'segunda', 1: 'terça', 2: 'quarta', 3: 'quinta', 4: 'sexta', 5: 'sábado', 6: 'domingo'}
 
-@st.cache_data(ttl=10) # Cache rápido
+@st.cache_data(ttl=5)
 def carregar_banco_nuvem():
     try:
         req = requests.get(URL_DB, headers=HEADERS_DB)
         if req.status_code == 200:
             data = req.json()['record']
             if 'ativo' not in data:
-                data = {'ativo': {}, 'backups': {}}
+                data = {'ativo': {}, 'backups': {}, 'escalas_arquivadas': {}}
+            if 'escalas_arquivadas' not in data:
+                data['escalas_arquivadas'] = {}
             return data
         else:
-            st.error("Falha ao conectar com o banco de dados da nuvem. Verifique o BIN_ID e API_KEY.")
+            st.error("Falha ao conectar com o banco de dados da nuvem.")
             return None
     except Exception as e:
         st.error(f"Erro de rede: {e}")
@@ -76,7 +138,50 @@ def estilizar_celula(cell, texto, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
     for run in p.runs:
         formatar_texto_pm(run, 'Arial', 10, bold=bold)
 
-def gerar_documento(escala_gerada, data_inicio, data_fim):
+def obter_nome_guerra(nome_completo):
+    def clean(s):
+        return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).upper().strip()
+    
+    nome_clean = clean(nome_completo)
+    for original, guerra in NOMES_DE_GUERRA.items():
+        if clean(original) == nome_clean:
+            return guerra
+    return None
+
+def estilizar_celula_nome(cell, nome_completo, align=WD_ALIGN_PARAGRAPH.LEFT):
+    """Aplica formatação quebrando o nome para deixar apenas o nome de guerra em negrito"""
+    p = cell.paragraphs[0]
+    p.alignment = align
+    p.paragraph_format.space_before = Pt(3)
+    p.paragraph_format.space_after = Pt(3)
+    p.paragraph_format.line_spacing = 1.0
+
+    nome_guerra = obter_nome_guerra(nome_completo)
+    
+    if not nome_guerra:
+        run = p.add_run(nome_completo)
+        formatar_texto_pm(run, 'Arial', 10, bold=False)
+        return
+
+    def clean(s):
+        return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).upper()
+
+    guerra_words = set(clean(nome_guerra).split())
+    parts = re.split(r'(\s+)', nome_completo)
+
+    for part in parts:
+        if not part.strip():
+            run = p.add_run(part)
+            formatar_texto_pm(run, 'Arial', 10, bold=False)
+        else:
+            if clean(part) in guerra_words:
+                run = p.add_run(part)
+                formatar_texto_pm(run, 'Arial', 10, bold=True)
+            else:
+                run = p.add_run(part)
+                formatar_texto_pm(run, 'Arial', 10, bold=False)
+
+def gerar_documento_bytes(escala_gerada):
     doc = Document()
     for section in doc.sections:
         section.top_margin = Cm(2.0)
@@ -127,13 +232,13 @@ def gerar_documento(escala_gerada, data_inicio, data_fim):
             row1 = table.add_row().cells
             estilizar_celula(row1[0], quartos[idx], bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
             estilizar_celula(row1[1], 'Sd. 3ª Classe PM', bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
-            estilizar_celula(row1[2], militar1['nome'], bold=False, align=WD_ALIGN_PARAGRAPH.LEFT)
+            estilizar_celula_nome(row1[2], militar1['nome'], align=WD_ALIGN_PARAGRAPH.LEFT)
             estilizar_celula(row1[3], militar1['cpf'], bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
             
             row2 = table.add_row().cells
             estilizar_celula(row2[0], '', bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
             estilizar_celula(row2[1], 'Sd. 3ª Classe PM', bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
-            estilizar_celula(row2[2], militar2['nome'], bold=False, align=WD_ALIGN_PARAGRAPH.LEFT)
+            estilizar_celula_nome(row2[2], militar2['nome'], align=WD_ALIGN_PARAGRAPH.LEFT)
             estilizar_celula(row2[3], militar2['cpf'], bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
             
             cell_qto_1 = row1[0]
@@ -153,9 +258,10 @@ def gerar_documento(escala_gerada, data_inicio, data_fim):
     run_ass = p_ass.add_run("\n\nAssinado Eletronicamente\n1º Ten. QOEM PM Jeferson Luis Fracaro,\nCoordenador do CFP 15º BPM.")
     formatar_texto_pm(run_ass, 'Arial', 10, bold=True)
     
-    nome_arquivo = f"escala_gerada_{data_inicio.strftime('%d_%m')}_a_{data_fim.strftime('%d_%m')}.docx"
-    doc.save(nome_arquivo)
-    return nome_arquivo
+    import io
+    target_stream = io.BytesIO()
+    doc.save(target_stream)
+    return target_stream.getvalue()
 
 feriados_nacionais_2026 = [
     datetime(2026, 1, 1).date(), datetime(2026, 2, 17).date(), datetime(2026, 4, 3).date(),
@@ -168,12 +274,11 @@ feriados_nacionais_2026 = [
 st.set_page_config(page_title="Gerador de Escala CFP", layout="wide")
 st.title("Gerador Automático - Escala de Guarda CFP")
 
-if 'arquivo_gerado' not in st.session_state:
-    st.session_state['arquivo_gerado'] = None
+if 'escala_recem_gerada' not in st.session_state:
+    st.session_state['escala_recem_gerada'] = None
+if 'nome_arquivo_recem_gerado' not in st.session_state:
+    st.session_state['nome_arquivo_recem_gerado'] = None
 
-alunos_df = None
-
-# Tenta carregar a planilha fixa que estará no repositório GitHub
 try:
     alunos_df = ler_planilha_segura('alunos.csv')
 except Exception:
@@ -181,18 +286,14 @@ except Exception:
     st.stop()
 
 if alunos_df is not None:
-    if 'NOME' not in alunos_df.columns or 'CPF' not in alunos_df.columns:
-        st.error("Erro: A planilha precisa ter as colunas exatas 'NOME' e 'CPF'.")
-        st.stop()
-        
     dados_nuvem = carregar_banco_nuvem()
     if dados_nuvem is None:
         st.stop()
         
     historico_ativo = dados_nuvem.get('ativo', {})
     backups_nuvem = dados_nuvem.get('backups', {})
+    escalas_arquivadas = dados_nuvem.get('escalas_arquivadas', {})
     
-    # Sincroniza alunos da planilha com a nuvem
     precisa_salvar = False
     for index, row in alunos_df.iterrows():
         cpf = str(row['CPF']).strip()
@@ -210,7 +311,7 @@ if alunos_df is not None:
         salvar_banco_nuvem(dados_nuvem)
     
     with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=False):
-        tab_geral, tab_individual = st.tabs(["📋 Visão Geral (Saldos)", "🔍 Consulta Individualizada por Aluno"])
+        tab_geral, tab_individual, tab_config = st.tabs(["📋 Visão Geral (Saldos)", "🔍 Consulta Individualizada por Aluno", "⚙️ Configuração Inicial"])
         
         with tab_geral:
             dados_tabela = []
@@ -231,7 +332,6 @@ if alunos_df is not None:
         with tab_individual:
             nomes_alunos = sorted([d['nome'] for d in historico_ativo.values()])
             aluno_sel = st.selectbox("Selecione o Aluno-Soldado para detalhamento:", nomes_alunos)
-            
             cpf_sel = [cpf for cpf, d in historico_ativo.items() if d['nome'] == aluno_sel][0]
             dados_aluno = historico_ativo[cpf_sel]
             
@@ -249,6 +349,47 @@ if alunos_df is not None:
             else:
                 st.info("Este militar ainda não possui nenhuma escala registrada.")
 
+        with tab_config:
+            st.markdown("### Configurar Histórico Inicial (Ponto Zero)")
+            st.write("Clique no botão abaixo apenas se o sistema estiver zerado para injetar o histórico das duas escalas antigas (11 a 24 de Maio).")
+            if st.button("🔄 Inicializar Ponto Zero (Escalas de 11 a 24 de Maio)"):
+                servicos_normais = ["Gabriela Regina Schneider", "Filipe Aparecido dos Santos", "Lucas Gabriel Souza de Campos", "João Victor Rapharred de Oliveira Abrahao", "Kauane Stefany Lopes", "Vitor Humberto Ortega Nascimento", "Lucas Eduardo Dornellas de Oliveira", "Tailer Costa Ribeiro dos Santos", "Daniel Barbosa Ramos", "Lorenna Elen de Souza Chiconato", "Carlos Eduardo Boava", "Ricardo Vinícius Zamparoni", "Lirian Borges Barbosa", "Wesley Rodrigues Padovan", "Victor Gonçalves Brum Silva", "Jonathan Henrique das Neves", "Thialis Venâncio dos Santos", "Rafael Ribeiro Garcia", "Gustavo Tivirolli Favaro", "Vitor Hugo Cardoso Almondes", "Danilo Eduardo de Oliveira", "Wallison Rodrigo Passerini", "Matheus Silva Aleluia", "Gustavo Henrique Nogueira", "Igor Henrique Bibanco", "Lucas Matheus dos Santos Lopes", "Carlos Eduardo Soares da Costa Filho", "Thiago Zanin", "Dener Vinícius Gomes Rodrigo", "Cláudio Márcio Silva Júnior", "Nathalia Vargas Lopes", "Felipe Israel de Almeida Guilherme", "Josué Almeida de Souza", "Leonardo Santiago Rodrigues", "Hemerson Oliveira Pacheco Junior", "Ana Paula Machado", "Tiago da Silva Ferreira", "Leonardo Brenes Burque", "Gabriel Magdiel Reis", "Letícia Lopes Martelossi", "Vitor Hugo Cardoso Almondes", "João Victor Bertola da Silva", "Lucas Vinicius da Silva Panta", "Eduardo Junior Marques", "Gabriela Regina Schneider", "Lucas Eduardo Dornellas de Oliveira", "Filipe Aparecido dos Santos", "Victor Gonçalves Brum Silva", "Jonathan Henrique das Neves", "Thialis Venâncio dos Santos", "Rafael Ribeiro Garcia", "Carina dos Santos", "Tailer Costa Ribeiro dos Santos", "Kauane Stefany Lopes", "Daniel Barbosa Ramos", "Vitor Humberto Ortega Nascimento", "João Victor Rapharred de Oliveira Abrahao", "Lucas Gabriel Souza de Campos", "Wesley Rodrigues Padovan", "Lirian Borges Barbosa"]
+                servicos_vermelhos = ["Hilda Heloisa Andrade Cunha", "Vitoria Cristina Cortelini", "Priscila de Andrade Correia", "Mateus Fujita Araújo", "Lucas Silva Piccioni", "Leonardo Cardoso Cosmos", "Alan Felipe Buck dos Santos", "Arthur Amador Silva", "Vitor Kauan Amorim dos Reis", "Edilma Aparecida Sereia da Silva", "Israel Mendes Martins", "Eduardo Cauan José", "Igor Henrique Bibanco", "Lucas Matheus dos Santos Lopes", "Carlos Eduardo Soares da Costa Filho", "Gustavo Tivirolli Favaro", "Carlos Eduardo Boava", "Ricardo Vinícius Zamparoni", "Vitor Hugo Cardoso Almondes", "Danilo Eduardo de Oliveira", "Wallison Rodrigo Passerini", "Matheus Silva Aleluia", "Gustavo Henrique Nogueira", "Thiago Zanin"]
+                
+                for cpf, dados in historico_ativo.items():
+                    n_aluno = dados['nome'].lower().strip()
+                    qtd_normal = sum(1 for n in servicos_normais if n.lower().strip() in n_aluno)
+                    qtd_vermelho = sum(1 for v in servicos_vermelhos if v.lower().strip() in n_aluno)
+                    
+                    historico_ativo[cpf]['normal'] = qtd_normal
+                    historico_ativo[cpf]['vermelho'] = qtd_vermelho
+                    historico_ativo[cpf]['datas_servico'] = []
+                    for _ in range(qtd_normal):
+                        historico_ativo[cpf]['datas_servico'].append({"data": "Maio/2026 (Base)", "tipo": "Normal"})
+                    for _ in range(qtd_vermelho):
+                        historico_ativo[cpf]['datas_servico'].append({"data": "Maio/2026 (Base)", "tipo": "Vermelha"})
+                
+                dados_nuvem['ativo'] = historico_ativo
+                dados_nuvem['backups']["backup_PONTO_INICIAL_BASE"] = json.loads(json.dumps(historico_ativo))
+                if salvar_banco_nuvem(dados_nuvem):
+                    st.success("Ponto Zero configurado com sucesso e salvo na nuvem!")
+                    time.sleep(1)
+                    st.rerun()
+
+    with st.expander("📂 ARQUIVOS DE ESCALAS JÁ GERADAS (Disponíveis para Download)", expanded=False):
+        if escalas_arquivadas:
+            for nome_arq, dados_escala in sorted(escalas_arquivadas.items(), reverse=True):
+                doc_bytes = gerar_documento_bytes(dados_escala)
+                st.download_button(
+                    label=f"📥 Baixar {nome_arq}",
+                    data=doc_bytes,
+                    file_name=nome_arq,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key=nome_arq
+                )
+        else:
+            st.info("Nenhuma escala arquivada no banco de dados ainda.")
+
     st.divider()
 
     st.subheader("Configuração do Período")
@@ -259,7 +400,6 @@ if alunos_df is not None:
         data_fim = st.date_input("Data de Término", format="DD/MM/YYYY")
         
     feriados = st.text_input("Feriados MUNICIPAIS (opcional - separados por vírgula DD/MM/AAAA):")
-    
     feriados_lista = []
     if feriados:
         try:
@@ -275,21 +415,17 @@ if alunos_df is not None:
         else:
             dias_ja_gerados = set(item['data'] for dados in historico_ativo.values() for item in dados.get('datas_servico', []))
             conflitos = []
-            
             delta = data_fim - data_inicio
             for i in range(delta.days + 1):
                 dia_atual = data_inicio + timedelta(days=i)
-                data_formatada = dia_atual.strftime('%d/%m/%Y')
-                if data_formatada in dias_ja_gerados:
-                    conflitos.append(data_formatada)
+                if dia_atual.strftime('%d/%m/%Y') in dias_ja_gerados:
+                    conflitos.append(dia_atual.strftime('%d/%m/%Y'))
                     
             if conflitos:
                 st.error(f"⚠️ **BLOQUEADO:** Já existe escala para: **{', '.join(conflitos)}**.")
                 st.stop()
 
-            # Cria o backup na nuvem
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            nome_backup = f"Backup do dia {datetime.now().strftime('%d/%m/%Y às %H:%M:%S')} (Antes de gerar {data_inicio.strftime('%d/%m')})"
+            nome_backup = f"Backup_antes_de_{data_inicio.strftime('%d_%m')}_a_{data_fim.strftime('%d_%m')}_{datetime.now().strftime('%H%M%S')}"
             dados_nuvem['backups'][nome_backup] = json.loads(json.dumps(historico_ativo))
 
             escala_final = {}
@@ -298,12 +434,11 @@ if alunos_df is not None:
             for i in range(delta.days + 1):
                 dia_atual = data_inicio + timedelta(days=i)
                 dia_semana = dia_atual.weekday()
-                prox_dia = dia_atual + timedelta(days=1)
                 
                 is_vermelho = dia_semana >= 5 or dia_atual in todos_feriados
                 tipo_dia = 'vermelho' if is_vermelho else 'normal'
                 
-                texto_data = f"EFETIVO: DIA {dia_atual.day:02d} DE {MESES_PT[dia_atual.month]} DE {dia_atual.year} – Das 07h00 de {DIAS_SEMANA_PT[dia_semana]} às 07h00 de {DIAS_SEMANA_PT[prox_dia.weekday()]}"
+                texto_data = f"EFETIVO: DIA {dia_atual.day:02d} DE {MESES_PT[dia_atual.month]} DE {dia_atual.year} – Das 07h00 de {DIAS_SEMANA_PT[dia_semana]} às 07h00 de {DIAS_SEMANA_PT[(dia_atual + timedelta(days=1)).weekday()]} "
                 data_formatada_simples = dia_atual.strftime('%d/%m/%Y')
                 
                 cpf_elegiveis = []
@@ -343,50 +478,47 @@ if alunos_df is not None:
                         "data": data_formatada_simples,
                         "tipo": "Vermelha" if tipo_dia == "vermelho" else "Normal"
                     })
-                    
                     plantonistas_do_dia.append({'cpf': cpf, 'nome': historico_temp[cpf]['nome']})
                     
                 escala_final[texto_data] = plantonistas_do_dia
 
-            # Salva o novo cenário na nuvem
+            nome_arquivo_novo = f"escala_gerada_{data_inicio.strftime('%d_%m')}_a_{data_fim.strftime('%d_%m')}.docx"
+            
+            dados_nuvem['escalas_arquivadas'][nome_arquivo_novo] = escala_final
             dados_nuvem['ativo'] = historico_temp
+            
             if salvar_banco_nuvem(dados_nuvem):
-                arquivo_docx = gerar_documento(escala_final, data_inicio, data_fim)
-                st.session_state['arquivo_gerado'] = arquivo_docx
+                st.session_state['escala_recem_gerada'] = escala_final
+                st.session_state['nome_arquivo_recem_gerado'] = nome_arquivo_novo
                 st.rerun()
-            else:
-                st.error("Erro ao tentar salvar dados na nuvem.")
 
-    # Exibição do Botão de Download na Sessão Atual (Aviso: O arquivo some se a página for recarregada)
-    if st.session_state['arquivo_gerado'] and os.path.exists(st.session_state['arquivo_gerado']):
-        st.success("Escala gerada com sucesso! Baixe o documento agora.")
-        with open(st.session_state['arquivo_gerado'], "rb") as file:
-            st.download_button(
-                label="📥 Baixar Documento Gerado (.docx)", 
-                data=file, 
-                file_name=st.session_state['arquivo_gerado'], 
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-        st.warning("⚠️ Importante: Salve este documento em seu computador. Ao atualizar a página, o arquivo temporário será apagado.")
+    if st.session_state['escala_recem_gerada']:
+        st.success("Escala gerada com sucesso!")
+        bytes_word = gerar_documento_bytes(st.session_state['escala_recem_gerada'])
+        st.download_button(
+            label="📥 Baixar Documento Recém Gerado (.docx)",
+            data=bytes_word,
+            file_name=st.session_state['nome_arquivo_recem_gerado'],
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
     st.divider()
-    st.subheader("⚠️ Restauração de Backups na Nuvem")
-    
+    st.subheader("⚠️ Linha do Tempo de Backups e Restauração")
     if backups_nuvem:
         opcoes_backup = sorted(list(backups_nuvem.keys()), reverse=True)
         backup_selecionado = st.selectbox("Selecione um ponto de restauração para desfazer um sorteio:", options=opcoes_backup)
         
         if st.button("Restaurar para o Ponto Selecionado", type="secondary"):
             dados_nuvem['ativo'] = dados_nuvem['backups'][backup_selecionado]
-            # Apaga o backup da lista após usar para manter a nuvem limpa
-            del dados_nuvem['backups'][backup_selecionado]
+            chaves_escalas = sorted(list(dados_nuvem['escalas_arquivadas'].keys()))
+            if chaves_escalas:
+                del dados_nuvem['escalas_arquivadas'][chaves_escalas[-1]]
             
+            del dados_nuvem['backups'][backup_selecionado]
             if salvar_banco_nuvem(dados_nuvem):
-                st.session_state['arquivo_gerado'] = None
-                st.success("Sistema restaurado na nuvem!")
+                st.session_state['escala_recem_gerada'] = None
+                st.success("Sistema restaurado com sucesso na nuvem!")
                 time.sleep(1)
                 st.rerun()
-            else:
-                st.error("Erro ao tentar restaurar na nuvem.")
     else:
         st.info("Nenhum ponto de restauração criado na nuvem ainda.")
