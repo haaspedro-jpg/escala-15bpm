@@ -458,7 +458,9 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
 with st.expander("📂 ARQUIVOS DE ESCALAS JÁ GERADAS (Disponíveis para Download)", expanded=False):
     if escalas_arquivadas:
         for nome_arq, dados_escala in sorted(escalas_arquivadas.items(), reverse=True):
-            col1, col2 = st.columns(2)
+            st.write(f"**{nome_arq}**")
+            
+            col1, col2, col3 = st.columns([0.4, 0.4, 0.2])
             
             if isinstance(dados_escala, dict) and 'escala' in dados_escala:
                 doc_bytes = gerar_documento_bytes(dados_escala['escala'])
@@ -466,13 +468,20 @@ with st.expander("📂 ARQUIVOS DE ESCALAS JÁ GERADAS (Disponíveis para Downlo
                 nome_arq_disp = nome_arq.replace("escala_gerada", "efetivo_disponivel")
                 
                 with col1:
-                    st.download_button(label=f"📥 Baixar {nome_arq}", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq)
+                    st.download_button(label="📥 Baixar Escala", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_esc_{nome_arq}")
                 with col2:
-                    st.download_button(label=f"📥 Baixar Efetivo Disponível ({nome_arq_disp})", data=disp_bytes, file_name=nome_arq_disp, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq_disp)
+                    st.download_button(label="📥 Baixar Disponíveis", data=disp_bytes, file_name=nome_arq_disp, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_disp_{nome_arq}")
             else:
                 doc_bytes = gerar_documento_bytes(dados_escala)
                 with col1:
-                    st.download_button(label=f"📥 Baixar {nome_arq}", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq)
+                    st.download_button(label=f"📥 Baixar Arquivo", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_old_{nome_arq}")
+            
+            with col3:
+                if st.button("❌ Excluir", key=f"del_{nome_arq}"):
+                    del dados_nuvem['escalas_arquivadas'][nome_arq]
+                    if salvar_banco_nuvem(dados_nuvem):
+                        st.rerun()
+            st.divider()
     else:
         st.info("Nenhuma escala arquivada no banco de dados ainda.")
 
