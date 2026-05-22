@@ -85,11 +85,9 @@ MESES_PT = {1: 'JANEIRO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL', 5: 'MAIO', 6:
             7: 'JULHO', 8: 'AGOSTO', 9: 'SETEMBRO', 10: 'OUTUBRO', 11: 'NOVEMBRO', 12: 'DEZEMBRO'}
 DIAS_SEMANA_PT = {0: 'segunda', 1: 'terça', 2: 'quarta', 3: 'quinta', 4: 'sexta', 5: 'sábado', 6: 'domingo'}
 
-# Limpador Universal para evitar falhas por acentos ou espaços
 def padronizar_texto(texto):
     if not isinstance(texto, str):
         return ""
-    # Remove acentos, caracteres especiais e todos os espaços
     t = ''.join(c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c))
     return t.upper().replace(" ", "").strip()
 
@@ -271,6 +269,68 @@ def gerar_documento_bytes(escala_gerada):
     doc.save(target_stream)
     return target_stream.getvalue()
 
+def gerar_documento_disponiveis_bytes(alunos_disponiveis, data_ini_str, data_fim_str):
+    doc = Document()
+    for section in doc.sections:
+        section.top_margin = Cm(2.0)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(2.0)
+        section.right_margin = Cm(2.0)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(12)
+    p.paragraph_format.line_spacing = 1.15
+    
+    texto_cabecalho = (
+        "ESTADO DO PARANÁ\n"
+        "POLÍCIA MILITAR\n"
+        "2º COMANDO REGIONAL DE POLÍCIA MILITAR\n"
+        "NÚCLEO DE ENSINO DO 15º BPM\n"
+        "CFP 15º BPM 2026/2027\n\n"
+        "RELAÇÃO DE EFETIVO DISPONÍVEL (NÃO ESCALADO NA GUARDA)\n"
+        f"Período: {data_ini_str} a {data_fim_str}\n"
+    )
+    run_cabecalho = p.add_run(texto_cabecalho)
+    formatar_texto_pm(run_cabecalho, 'Arial', 10, bold=True)
+    
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    hdr_cells = table.rows[0].cells
+    headers = ['Nº', 'NOME', 'CPF']
+    for idx, text in enumerate(headers):
+        estilizar_celula(hdr_cells[idx], text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        hdr_cells[idx].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        
+    for idx, aluno in enumerate(alunos_disponiveis):
+        row = table.add_row().cells
+        estilizar_celula(row[0], str(idx + 1), bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
+        estilizar_celula_nome(row[1], aluno['nome'], align=WD_ALIGN_PARAGRAPH.LEFT)
+        estilizar_celula(row[2], aluno['cpf'], bold=False, align=WD_ALIGN_PARAGRAPH.CENTER)
+        
+        row[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        row[1].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        row[2].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        
+    for row in table.rows:
+        row.cells[0].width = Cm(1.5)
+        row.cells[1].width = Cm(11.5)
+        row.cells[2].width = Cm(4.0)
+
+    p_ass = doc.add_paragraph()
+    p_ass.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_ass.paragraph_format.space_before = Pt(24)
+    run_ass = p_ass.add_run("\n\nAssinado Eletronicamente\n1º Ten. QOEM PM Jeferson Luis Fracaro,\nCoordenador do CFP 15º BPM.")
+    formatar_texto_pm(run_ass, 'Arial', 10, bold=True)
+    
+    import io
+    target_stream = io.BytesIO()
+    doc.save(target_stream)
+    return target_stream.getvalue()
+
 feriados_nacionais_2026 = [
     datetime(2026, 1, 1).date(), datetime(2026, 2, 17).date(), datetime(2026, 4, 3).date(),
     datetime(2026, 4, 21).date(), datetime(2026, 5, 1).date(), datetime(2026, 6, 4).date(),
@@ -284,8 +344,8 @@ st.title("Gerador Automático - Escala de Guarda CFP")
 
 if 'escala_recem_gerada' not in st.session_state:
     st.session_state['escala_recem_gerada'] = None
-if 'nome_arquivo_recem_gerado' not in st.session_state:
     st.session_state['nome_arquivo_recem_gerado'] = None
+    st.session_state['disponiveis_recem_gerados'] = None
 
 caminho_planilha = 'alunos.xlsx' if os.path.exists('alunos.xlsx') else 'alunos.csv'
 
@@ -398,14 +458,21 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
 with st.expander("📂 ARQUIVOS DE ESCALAS JÁ GERADAS (Disponíveis para Download)", expanded=False):
     if escalas_arquivadas:
         for nome_arq, dados_escala in sorted(escalas_arquivadas.items(), reverse=True):
-            doc_bytes = gerar_documento_bytes(dados_escala)
-            st.download_button(
-                label=f"📥 Baixar {nome_arq}",
-                data=doc_bytes,
-                file_name=nome_arq,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key=nome_arq
-            )
+            col1, col2 = st.columns(2)
+            
+            if isinstance(dados_escala, dict) and 'escala' in dados_escala:
+                doc_bytes = gerar_documento_bytes(dados_escala['escala'])
+                disp_bytes = gerar_documento_disponiveis_bytes(dados_escala['disponiveis'], dados_escala['data_inicio'], dados_escala['data_fim'])
+                nome_arq_disp = nome_arq.replace("escala_gerada", "efetivo_disponivel")
+                
+                with col1:
+                    st.download_button(label=f"📥 Baixar {nome_arq}", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq)
+                with col2:
+                    st.download_button(label=f"📥 Baixar Efetivo Disponível ({nome_arq_disp})", data=disp_bytes, file_name=nome_arq_disp, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq_disp)
+            else:
+                doc_bytes = gerar_documento_bytes(dados_escala)
+                with col1:
+                    st.download_button(label=f"📥 Baixar {nome_arq}", data=doc_bytes, file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=nome_arq)
     else:
         st.info("Nenhuma escala arquivada no banco de dados ainda.")
 
@@ -449,6 +516,7 @@ if st.button("Gerar Escala", type="primary"):
 
         escala_final = {}
         historico_temp = json.loads(json.dumps(historico_ativo))
+        cpfs_escalados_no_periodo = set()
         
         for i in range(delta.days + 1):
             dia_atual = data_inicio + timedelta(days=i)
@@ -488,6 +556,7 @@ if st.button("Gerar Escala", type="primary"):
             plantonistas_do_dia = []
             
             for cpf in selecionados:
+                cpfs_escalados_no_periodo.add(cpf)
                 historico_temp[cpf][tipo_dia] += 1
                 historico_temp[cpf]['ultimo_servico'] = dia_atual.strftime('%Y-%m-%d')
                 if 'datas_servico' not in historico_temp[cpf]:
@@ -501,25 +570,57 @@ if st.button("Gerar Escala", type="primary"):
                 
             escala_final[texto_data] = plantonistas_do_dia
 
+        # Levanta quem não pegou serviço no período gerado
+        alunos_disponiveis = []
+        for cpf, dados in historico_temp.items():
+            if cpf not in cpfs_escalados_no_periodo:
+                alunos_disponiveis.append({'cpf': cpf, 'nome': dados['nome']})
+        
+        alunos_disponiveis.sort(key=lambda x: x['nome'])
+
         nome_arquivo_novo = f"escala_gerada_{data_inicio.strftime('%d_%m')}_a_{data_fim.strftime('%d_%m')}.docx"
         
-        dados_nuvem['escalas_arquivadas'][nome_arquivo_novo] = escala_final
+        escala_completa = {
+            'escala': escala_final,
+            'disponiveis': alunos_disponiveis,
+            'data_inicio': data_inicio.strftime('%d/%m/%Y'),
+            'data_fim': data_fim.strftime('%d/%m/%Y')
+        }
+        
+        dados_nuvem['escalas_arquivadas'][nome_arquivo_novo] = escala_completa
         dados_nuvem['ativo'] = historico_temp
         
         if salvar_banco_nuvem(dados_nuvem):
             st.session_state['escala_recem_gerada'] = escala_final
+            st.session_state['disponiveis_recem_gerados'] = escala_completa
             st.session_state['nome_arquivo_recem_gerado'] = nome_arquivo_novo
             st.rerun()
 
 if st.session_state['escala_recem_gerada']:
-    st.success("Escala gerada com sucesso!")
-    bytes_word = gerar_documento_bytes(st.session_state['escala_recem_gerada'])
-    st.download_button(
-        label="📥 Baixar Documento Recém Gerado (.docx)",
-        data=bytes_word,
-        file_name=st.session_state['nome_arquivo_recem_gerado'],
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    st.success("Escala e Relação de Efetivo geradas com sucesso!")
+    
+    bytes_word_escala = gerar_documento_bytes(st.session_state['escala_recem_gerada'])
+    
+    dados_comp = st.session_state['disponiveis_recem_gerados']
+    bytes_word_disp = gerar_documento_disponiveis_bytes(dados_comp['disponiveis'], dados_comp['data_inicio'], dados_comp['data_fim'])
+    
+    nome_arq_disp = st.session_state['nome_arquivo_recem_gerado'].replace("escala_gerada", "efetivo_disponivel")
+    
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        st.download_button(
+            label="📥 Baixar Escala Gerada (.docx)",
+            data=bytes_word_escala,
+            file_name=st.session_state['nome_arquivo_recem_gerado'],
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    with col_d2:
+        st.download_button(
+            label="📥 Baixar Relação de Efetivo Disponível (.docx)",
+            data=bytes_word_disp,
+            file_name=nome_arq_disp,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
 st.divider()
 st.subheader("⚠️ Linha do Tempo de Backups e Restauração")
@@ -536,6 +637,7 @@ if backups_nuvem:
         del dados_nuvem['backups'][backup_selecionado]
         if salvar_banco_nuvem(dados_nuvem):
             st.session_state['escala_recem_gerada'] = None
+            st.session_state['disponiveis_recem_gerados'] = None
             st.success("Sistema restaurado com sucesso na nuvem!")
             time.sleep(1)
             st.rerun()
