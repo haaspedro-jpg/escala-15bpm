@@ -442,7 +442,9 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
                 
                 historico_ativo[cpf]['normal'] = qtd_normal
                 historico_ativo[cpf]['vermelho'] = qtd_vermelho
+                historico_ativo[cpf]['ultimo_servico'] = None  # <-- CORREÇÃO: Limpa a memória de datas do futuro
                 historico_ativo[cpf]['datas_servico'] = []
+                
                 for _ in range(qtd_normal):
                     historico_ativo[cpf]['datas_servico'].append({"data": "Maio/2026 (Base)", "tipo": "Normal"})
                 for _ in range(qtd_vermelho):
@@ -542,6 +544,7 @@ if st.button("Gerar Escala", type="primary"):
                 elegivel = True
                 if dados.get('ultimo_servico'):
                     ultimo_servico_data = datetime.strptime(dados['ultimo_servico'], '%Y-%m-%d').date()
+                    # <-- CORREÇÃO DA MATEMÁTICA DO DESCANSO (Bloqueia futuros lixos do sistema)
                     if (dia_atual - ultimo_servico_data).days <= 1:
                         elegivel = False
                         
