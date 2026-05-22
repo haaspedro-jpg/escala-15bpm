@@ -94,7 +94,8 @@ def padronizar_texto(texto):
 @st.cache_data(ttl=5)
 def carregar_banco_nuvem():
     try:
-        req = requests.get(URL_DB, headers=HEADERS_DB)
+        # TIMEOUT ADICIONADO PARA NÃO FICAR CARREGANDO INFINITAMENTE
+        req = requests.get(URL_DB, headers=HEADERS_DB, timeout=10)
         if req.status_code == 200:
             data = req.json()['record']
             if 'ativo' not in data:
@@ -106,17 +107,21 @@ def carregar_banco_nuvem():
             st.error("Falha ao conectar com o banco de dados da nuvem.")
             return None
     except Exception as e:
-        st.error(f"Erro de rede: {e}")
+        st.error(f"Erro de rede ao carregar: O servidor demorou muito para responder. Tente recarregar a página.")
         return None
 
 def salvar_banco_nuvem(dados_completos):
     try:
-        req = requests.put(URL_DB, json=dados_completos, headers=HEADERS_DB)
+        # TIMEOUT ADICIONADO PARA NÃO TRAVAR O BOTÃO DE GERAR
+        req = requests.put(URL_DB, json=dados_completos, headers=HEADERS_DB, timeout=10)
         if req.status_code == 200:
             st.cache_data.clear()
             return True
-        return False
-    except:
+        else:
+            st.error(f"Erro da Nuvem (Código {req.status_code}): O arquivo pode ter excedido o limite de tamanho.")
+            return False
+    except Exception as e:
+        st.error(f"Erro de rede ao salvar: A nuvem não respondeu a tempo. {e}")
         return False
 
 def ler_planilha_segura(caminho_ou_arquivo):
@@ -442,7 +447,7 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
                 
                 historico_ativo[cpf]['normal'] = qtd_normal
                 historico_ativo[cpf]['vermelho'] = qtd_vermelho
-                historico_ativo[cpf]['ultimo_servico'] = None  # <-- CORREÇÃO: Limpa a memória de datas do futuro
+                historico_ativo[cpf]['ultimo_servico'] = None
                 historico_ativo[cpf]['datas_servico'] = []
                 
                 for _ in range(qtd_normal):
@@ -525,6 +530,12 @@ if st.button("Gerar Escala", type="primary"):
         nome_backup = f"Backup_antes_de_{data_inicio.strftime('%d_%m')}_a_{data_fim.strftime('%d_%m')}_{datetime.now().strftime('%H%M%S')}"
         dados_nuvem['backups'][nome_backup] = json.loads(json.dumps(historico_ativo))
 
+        # --- LIXEIRO AUTOMÁTICO DE BACKUPS (Evita inchar o banco e travar o carregamento) ---
+        if len(dados_nuvem['backups']) > 5:
+            chaves_ordenadas = sorted(list(dados_nuvem['backups'].keys()))
+            for chave_velha in chaves_ordenadas[:-5]:
+                del dados_nuvem['backups'][chave_velha]
+
         escala_final = {}
         historico_temp = json.loads(json.dumps(historico_ativo))
         cpfs_escalados_no_periodo = set()
@@ -544,7 +555,6 @@ if st.button("Gerar Escala", type="primary"):
                 elegivel = True
                 if dados.get('ultimo_servico'):
                     ultimo_servico_data = datetime.strptime(dados['ultimo_servico'], '%Y-%m-%d').date()
-                    # <-- CORREÇÃO DA MATEMÁTICA DO DESCANSO (Bloqueia futuros lixos do sistema)
                     if (dia_atual - ultimo_servico_data).days <= 1:
                         elegivel = False
                         
