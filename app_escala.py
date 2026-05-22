@@ -85,6 +85,14 @@ MESES_PT = {1: 'JANEIRO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL', 5: 'MAIO', 6:
             7: 'JULHO', 8: 'AGOSTO', 9: 'SETEMBRO', 10: 'OUTUBRO', 11: 'NOVEMBRO', 12: 'DEZEMBRO'}
 DIAS_SEMANA_PT = {0: 'segunda', 1: 'terça', 2: 'quarta', 3: 'quinta', 4: 'sexta', 5: 'sábado', 6: 'domingo'}
 
+# Limpador Universal para evitar falhas por acentos ou espaços
+def padronizar_texto(texto):
+    if not isinstance(texto, str):
+        return ""
+    # Remove acentos, caracteres especiais e todos os espaços
+    t = ''.join(c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c))
+    return t.upper().replace(" ", "").strip()
+
 @st.cache_data(ttl=5)
 def carregar_banco_nuvem():
     try:
@@ -143,12 +151,9 @@ def estilizar_celula(cell, texto, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
         formatar_texto_pm(run, 'Arial', 10, bold=bold)
 
 def obter_nome_guerra(nome_completo):
-    def clean(s):
-        return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).upper().strip()
-    
-    nome_clean = clean(nome_completo)
+    nome_alvo = padronizar_texto(nome_completo)
     for original, guerra in NOMES_DE_GUERRA.items():
-        if clean(original) == nome_clean:
+        if padronizar_texto(original) == nome_alvo:
             return guerra
     return None
 
@@ -166,10 +171,10 @@ def estilizar_celula_nome(cell, nome_completo, align=WD_ALIGN_PARAGRAPH.LEFT):
         formatar_texto_pm(run, 'Arial', 10, bold=False)
         return
 
-    def clean(s):
+    def remover_acentos(s):
         return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).upper()
 
-    guerra_words = set(clean(nome_guerra).split())
+    guerra_words = set(remover_acentos(nome_guerra).split())
     parts = re.split(r'(\s+)', nome_completo)
 
     for part in parts:
@@ -177,7 +182,7 @@ def estilizar_celula_nome(cell, nome_completo, align=WD_ALIGN_PARAGRAPH.LEFT):
             run = p.add_run(part)
             formatar_texto_pm(run, 'Arial', 10, bold=False)
         else:
-            if clean(part) in guerra_words:
+            if remover_acentos(part) in guerra_words:
                 run = p.add_run(part)
                 formatar_texto_pm(run, 'Arial', 10, bold=True)
             else:
@@ -282,7 +287,6 @@ if 'escala_recem_gerada' not in st.session_state:
 if 'nome_arquivo_recem_gerado' not in st.session_state:
     st.session_state['nome_arquivo_recem_gerado'] = None
 
-# Agora prioriza ler o arquivo .xlsx
 caminho_planilha = 'alunos.xlsx' if os.path.exists('alunos.xlsx') else 'alunos.csv'
 
 if not os.path.exists(caminho_planilha):
@@ -307,7 +311,6 @@ historico_ativo = dados_nuvem.get('ativo', {})
 backups_nuvem = dados_nuvem.get('backups', {})
 escalas_arquivadas = dados_nuvem.get('escalas_arquivadas', {})
 
-# Sincronização automática inicial da planilha (Conserta os nomes defeituosos)
 precisa_salvar = False
 for index, row in alunos_df.iterrows():
     cpf = str(row['CPF']).strip()
@@ -316,7 +319,6 @@ for index, row in alunos_df.iterrows():
         historico_ativo[cpf] = {'nome': nome, 'normal': 0, 'vermelho': 0, 'ultimo_servico': None, 'datas_servico': []}
         precisa_salvar = True
     else:
-        # Se o nome no banco tiver símbolos quebrados e a planilha nova estiver certa, ele corrige sozinho
         if historico_ativo[cpf]['nome'] != nome:
             historico_ativo[cpf]['nome'] = nome
             precisa_salvar = True
@@ -367,15 +369,16 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
 
     with tab_config:
         st.markdown("### Configurar Histórico Inicial (Ponto Zero)")
-        st.write("Clique no botão abaixo apenas se o sistema estiver zerado para injetar o histórico das duas escalas antigas (11 a 24 de Maio).")
-        if st.button("🔄 Inicializar Ponto Zero (Escalas de 11 a 24 de Maio)"):
+        st.write("Clique no botão abaixo APENAS UMA VEZ caso o sistema esteja zerado para recontar os pontos de partida das escalas de 11 a 24 de Maio.")
+        if st.button("🔄 Inicializar Ponto Zero Infalível (Escalas de 11 a 24 de Maio)"):
             servicos_normais = ["Gabriela Regina Schneider", "Filipe Aparecido dos Santos", "Lucas Gabriel Souza de Campos", "João Victor Rapharred de Oliveira Abrahao", "Kauane Stefany Lopes", "Vitor Humberto Ortega Nascimento", "Lucas Eduardo Dornellas de Oliveira", "Tailer Costa Ribeiro dos Santos", "Daniel Barbosa Ramos", "Lorenna Elen de Souza Chiconato", "Carlos Eduardo Boava", "Ricardo Vinícius Zamparoni", "Lirian Borges Barbosa", "Wesley Rodrigues Padovan", "Victor Gonçalves Brum Silva", "Jonathan Henrique das Neves", "Thialis Venâncio dos Santos", "Rafael Ribeiro Garcia", "Gustavo Tivirolli Favaro", "Vitor Hugo Cardoso Almondes", "Danilo Eduardo de Oliveira", "Wallison Rodrigo Passerini", "Matheus Silva Aleluia", "Gustavo Henrique Nogueira", "Igor Henrique Bibanco", "Lucas Matheus dos Santos Lopes", "Carlos Eduardo Soares da Costa Filho", "Thiago Zanin", "Dener Vinícius Gomes Rodrigo", "Cláudio Márcio Silva Júnior", "Nathalia Vargas Lopes", "Felipe Israel de Almeida Guilherme", "Josué Almeida de Souza", "Leonardo Santiago Rodrigues", "Hemerson Oliveira Pacheco Junior", "Ana Paula Machado", "Tiago da Silva Ferreira", "Leonardo Brenes Burque", "Gabriel Magdiel Reis", "Letícia Lopes Martelossi", "Vitor Hugo Cardoso Almondes", "João Victor Bertola da Silva", "Lucas Vinicius da Silva Panta", "Eduardo Junior Marques", "Gabriela Regina Schneider", "Lucas Eduardo Dornellas de Oliveira", "Filipe Aparecido dos Santos", "Victor Gonçalves Brum Silva", "Jonathan Henrique das Neves", "Thialis Venâncio dos Santos", "Rafael Ribeiro Garcia", "Carina dos Santos", "Tailer Costa Ribeiro dos Santos", "Kauane Stefany Lopes", "Daniel Barbosa Ramos", "Vitor Humberto Ortega Nascimento", "João Victor Rapharred de Oliveira Abrahao", "Lucas Gabriel Souza de Campos", "Wesley Rodrigues Padovan", "Lirian Borges Barbosa"]
             servicos_vermelhos = ["Hilda Heloisa Andrade Cunha", "Vitoria Cristina Cortelini", "Priscila de Andrade Correia", "Mateus Fujita Araújo", "Lucas Silva Piccioni", "Leonardo Cardoso Cosmos", "Alan Felipe Buck dos Santos", "Arthur Amador Silva", "Vitor Kauan Amorim dos Reis", "Edilma Aparecida Sereia da Silva", "Israel Mendes Martins", "Eduardo Cauan José", "Igor Henrique Bibanco", "Lucas Matheus dos Santos Lopes", "Carlos Eduardo Soares da Costa Filho", "Gustavo Tivirolli Favaro", "Carlos Eduardo Boava", "Ricardo Vinícius Zamparoni", "Vitor Hugo Cardoso Almondes", "Danilo Eduardo de Oliveira", "Wallison Rodrigo Passerini", "Matheus Silva Aleluia", "Gustavo Henrique Nogueira", "Thiago Zanin"]
             
             for cpf, dados in historico_ativo.items():
-                n_aluno = dados['nome'].lower().strip()
-                qtd_normal = sum(1 for n in servicos_normais if n.lower().strip() in n_aluno)
-                qtd_vermelho = sum(1 for v in servicos_vermelhos if v.lower().strip() in n_aluno)
+                nome_alvo_limpo = padronizar_texto(dados['nome'])
+                
+                qtd_normal = sum(1 for n in servicos_normais if padronizar_texto(n) == nome_alvo_limpo)
+                qtd_vermelho = sum(1 for v in servicos_vermelhos if padronizar_texto(v) == nome_alvo_limpo)
                 
                 historico_ativo[cpf]['normal'] = qtd_normal
                 historico_ativo[cpf]['vermelho'] = qtd_vermelho
@@ -388,11 +391,10 @@ with st.expander("📊 PAINEL DE AUDITORIA E CONSULTA DE ESCALAS", expanded=Fals
             dados_nuvem['ativo'] = historico_ativo
             dados_nuvem['backups']["backup_PONTO_INICIAL_BASE"] = json.loads(json.dumps(historico_ativo))
             if salvar_banco_nuvem(dados_nuvem):
-                st.success("Ponto Zero configurado com sucesso e salvo na nuvem!")
-                time.sleep(1)
+                st.success("Ponto Zero blindado! A contagem foi salva com sucesso na nuvem!")
+                time.sleep(2)
                 st.rerun()
 
-# ACERVO DE DOCUMENTOS SALVOS NA NUVEM
 with st.expander("📂 ARQUIVOS DE ESCALAS JÁ GERADAS (Disponíveis para Download)", expanded=False):
     if escalas_arquivadas:
         for nome_arq, dados_escala in sorted(escalas_arquivadas.items(), reverse=True):
